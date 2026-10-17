@@ -79,6 +79,55 @@ The dataset mount is read-only. Put generated outputs in a writable location, an
 
 Keep `.env` out of Git. Do not put tokens in Dockerfiles, image layers, repository URLs, or task arguments. Docker socket access gives the agent administrative control over the host Docker daemon.
 
+## Training Docker image
+
+The agent launches training tasks in a separate Docker image. You can use the custom training image defined in `dockers/torch:2.9.1-py3.12-cu128/`.
+
+For this locally built image, build it on each training server before submitting tasks:
+
+```bash
+cd '/home/j/projects_mldl/clearml-agent/dockers/torch:2.9.1-py3.12-cu128'
+sudo docker build -t clearml-local/torch:2.9.1-py3.12-cu128 -f Dockerfile .
+sudo docker image inspect clearml-local/torch:2.9.1-py3.12-cu128
+```
+
+Adjust the project path for your server. Set the matching tag in `.env`:
+
+```dotenv
+TRAINING_IMAGE=clearml-local/torch:2.9.1-py3.12-cu128
+```
+
+Apply the configuration with `sudo docker compose up -d --build` after existing tasks have finished or stopped. This selects the image as the agent's default training image; a task can override it with its own Docker image setting. The Compose build creates the agent image, so build the training image separately using the command above.
+
+A successful local build registers the tag with that server's Docker daemon. You do not need to publish it to Docker Hub or another registry for that server to use it. For multi-node training, build or load the image on every participating server, or publish it to a registry that all servers can pull from. Images available from an accessible registry can be pulled rather than built locally. Private registries require Docker authentication on the training hosts.
+
+### Select an image and pip packages in training code
+
+`TRAINING_IMAGE` is the agent's default. Training code can select a different Docker image for an individual task and specify its Python packages before submitting the task:
+
+```python
+from clearml import Task
+
+task = Task.init(project_name="training", task_name="my-training")
+task.set_base_docker(
+    docker_image="clearml-local/torch:2.9.1-py3.12-cu128"
+)
+task.set_packages("requirements.txt")
+task.execute_remotely(queue_name="default")
+
+# Training code continues here when the agent runs this task.
+```
+
+Keep `requirements.txt` in the training repository and use a path relative to the submission script's working directory. Include all required Python packages because `set_packages()` replaces the task's recorded package list. Alternatively, specify a complete list directly, for example `task.set_packages(["clearml", "torch==2.9.1", "numpy", "tqdm"])`, adjusting it to your project.
+
+For an additional package alongside automatic dependency detection, call `Task.add_requirements("package-name", "==version")` before `Task.init()`. Use `set_packages()` when you want to explicitly define the complete requirements instead.
+
+The agent uses the task's selected image in preference to its default, prepares the task's Python environment, and installs the recorded pip requirements before starting the training script. Setting requirements in code records instructions for remote execution; it does not install packages into the local submission process or rebuild the Docker image. Submit these settings before `execute_remotely()` so they are available when the agent prepares the environment. Package installation requires access to the configured package index or other package sources, and package versions must be compatible with the image's Python and CUDA environment.
+
+Changing the task image or Python dependencies does not require changing the agent's `.env`. The selected image must still be available locally or pullable on every participating training server. For system libraries and tools that pip cannot provide, update the training Dockerfile and rebuild the image.
+
+See the [ClearML Task SDK reference](https://clear.ml/docs/latest/docs/references/sdk/task/) for `set_base_docker()`, `set_packages()`, and `add_requirements()`.
+
 ## Start
 
 1. Copy `.env_bak` to `.env` as shown above. Set the server URLs and API keys in `.env`, then adjust host paths, GPUs, and the image for your machine.
@@ -139,6 +188,21 @@ Check their associated tasks and stop/remove only the containers that need clean
 ## Multiple workers
 
 Multiple hosts can watch the same queue. To run multiple copies on one host, give each deployment a separate Compose project name, worker ID, and cache directory. The Compose file sets `name: clearml-worker`; override it with `docker compose -p <unique-name> ...` for each deployment. Assign GPUs appropriately for the workloads.
+
+## Multi-node DDP: prepare the agents
+
+Before starting a multi-node DDP job, prepare every training server:
+
+- Run one agent on each participating server and give each agent a unique `AGENT_WORKER_ID`.
+- Configure the agents to watch the queue used by the distributed job. A dedicated queue, such as `ddp`, helps keep unrelated tasks separate.
+- Set `WORKER_GPUS` on each server to the GPUs assigned to the job. This exposes GPUs to training containers; the training launcher must start the DDP processes.
+- Make sure every server can reach the same ClearML Server. Use reachable server addresses instead of `localhost` when the management server is on another machine.
+- Make sure the training servers can communicate with each other for DDP and NCCL. Host networking is already enabled, but routing and firewall rules must still allow that traffic.
+- Prepare compatible GPU drivers, NVIDIA Container Toolkit, training images, repository access, and datasets on every server. Dataset paths inside containers must match the training configuration.
+
+**You must keep the servers assigned to the DDP job free of other work.** For example, a two-node job needs an available agent on each of two servers. If server A starts its part while server B is still running another task, A waits for B and DDP training cannot proceed. The waiting job may eventually time out and fail. With this Compose setup, each agent picks up tasks independently, so check that all participating agents are idle before submitting the job and keep unrelated jobs off those servers during training. A dedicated queue helps separate tasks, but does not reserve the servers or GPUs for you.
+
+The training repository should document the multi-node launcher, ranks, data sampling, and checkpoint handling. This agent project provides the execution environment; setting `WORKER_GPUS` alone does not configure DDP.
 
 ## GitHub publication
 
