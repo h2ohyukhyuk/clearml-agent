@@ -12,6 +12,21 @@ Run one ClearML Agent with Docker Compose. The agent watches a ClearML queue and
 
 The agent image installs `clearml-agent==3.0.3`, Git, and the Docker CLI. The training image is separate.
 
+The `agent` service in `compose.yaml` uses `./dockers/agent` as its build context. Running `docker compose up -d --build` builds `dockers/agent/Dockerfile` into the image `clearml-local/agent:3.0.3-py3.12` and uses that image for the agent container. This container watches the queue and launches training containers through the host Docker socket. Training tasks use a separate image, such as the custom image built from `dockers/torch:2.9.1-py3.12-cu128/`.
+
+## Agent container and training container
+
+This project uses two separate Docker images with different roles:
+
+| Docker sources | Image tag | Role | Build method |
+| --- | --- | --- | --- |
+| `dockers/agent/` | `clearml-local/agent:3.0.3-py3.12` | Runs the ClearML Agent worker service. It watches the queue, prepares tasks, and launches training containers. | Built by `docker compose up -d --build`. |
+| `dockers/torch:2.9.1-py3.12-cu128/` | `clearml-local/torch:2.9.1-py3.12-cu128` | Runs the actual training code in a task's training container, with the GPUs and dataset mounts supplied by the agent. | Build separately on each training host, or distribute the built image. |
+
+The worker service itself runs in the **agent container**. When it receives a training task, it launches a separate **training container** using the selected training image. The custom PyTorch image in `dockers/torch:2.9.1-py3.12-cu128/` is for this training container; it is not the image used to run the agent service.
+
+Set `TRAINING_IMAGE=clearml-local/torch:2.9.1-py3.12-cu128` in `.env` to use this PyTorch image as the default for training tasks. A task can select another image through `task.set_base_docker()`. Both containers run on the training host, and the agent controls the training container through the host Docker socket. The training container is created by the agent and is not a service in this Compose file.
+
 ## Files
 
 ```text
@@ -21,7 +36,7 @@ compose.yaml                           Agent service
 start.sh                               Start or rebuild the agent
 cache/                                 Persistent agent caches (ignored by Git)
 dockers/agent/                         Agent Dockerfile and entrypoint
-dockers/torch:2.9.1-py3.12-cu128/       Local training-image build files
+dockers/torch:2.9.1-py3.12-cu128/       Training-container Dockerfile and build scripts
 ```
 
 ## Configuration
