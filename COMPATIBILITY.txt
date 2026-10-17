@@ -1,0 +1,35 @@
+Compatibility review — 2026-10-16
+
+Pinned combination for ordinary OSS Task / Queue / Worker execution:
+  ClearML Server 2.4.0
+  ClearML Agent 3.0.3
+  ClearML SDK 2.1.12 (training image and MNIST requirements)
+  Agent Python 3.12
+  Agent Docker CLI 29.8.2 (matches currently observed host Docker 29.8.2)
+
+Evidence from exact official release tags, not only latest-version selection:
+- Server v2.4.0 exposes versioned Task APIs including 2.5, 2.9, 2.13,
+  2.20, 2.23 and up to 2.35; Workers/Queues include 2.4.
+- Agent v3.0.3 ships service bindings v2_4 and v2_5 and negotiates the
+  server API level from the authentication token.
+- SDK v2.1.12 ships service bindings v2_9/v2_13/v2_20/v2_23 and likewise
+  reads server API capabilities from the token.
+- This supports the selected basic execution/recording API combination.
+  This is source-based compatibility assessment, NOT a vendor-certified
+  three-component compatibility matrix or an end-to-end runtime test.
+- Local /debug.ping responded HTTP 200 with requested API 2.35.
+  No credentials were read/output and no Task was created for that check.
+- Replaced Debian docker.io with official Docker CLI 29.8.2 to avoid an
+  old CLI/modern Engine API mismatch. Docker CLI tag manifest verified.
+
+Official sources:
+https://github.com/clearml/clearml-server/tree/v2.4.0/apiserver/schema/services
+https://github.com/clearml/clearml-agent/tree/v3.0.3/clearml_agent/backend_api/services
+https://github.com/clearml/clearml-agent/blob/v3.0.3/clearml_agent/backend_api/session/session.py
+https://github.com/clearml/clearml/tree/v2.1.12/clearml/backend_api/services
+https://github.com/clearml/clearml/blob/v2.1.12/clearml/backend_api/session/session.py
+
+Runtime checks still required by user:
+Build Agent image; set .env URL/keys; connect Worker; submit one MNIST Task;
+verify child container starts, metrics arrive and model artifact downloads.
+No container build/start or training performed during this review.

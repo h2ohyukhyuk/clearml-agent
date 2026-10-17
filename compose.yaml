@@ -1,0 +1,45 @@
+# Deploy independently on the learning server. No ClearML Server services here.
+name: clearml-worker
+services:
+  agent:
+    build:
+      context: ./dockers/agent
+    image: clearml-local/agent:3.0.3-py3.12
+    restart: unless-stopped
+    network_mode: host
+    init: true
+    stop_grace_period: 120s
+    environment:
+      CLEARML_API_HOST: ${CLEARML_API_HOST}
+      CLEARML_WEB_HOST: ${CLEARML_WEB_HOST}
+      CLEARML_FILES_HOST: ${CLEARML_FILES_HOST}
+      CLEARML_API_ACCESS_KEY: ${CLEARML_API_ACCESS_KEY}
+      CLEARML_API_SECRET_KEY: ${CLEARML_API_SECRET_KEY}
+      CLEARML_AGENT_GIT_USER: ${CLEARML_AGENT_GIT_USER:-}
+      CLEARML_AGENT_GIT_PASS: ${CLEARML_AGENT_GIT_PASS:-}
+      CLEARML_AGENT_GIT_HOST: ${CLEARML_AGENT_GIT_HOST:-github.com}
+      CLEARML_WORKER_ID: ${AGENT_WORKER_ID:-training-worker-1}
+      CLEARML_AGENT_DOCKER_HOST_MOUNT: ${AGENT_HOST_DIR}/cache:/root/.clearml
+      CLEARML_AGENT_EXTRA_DOCKER_LABELS: 'clearml.worker=${AGENT_WORKER_ID:-training-worker-1}'
+      AGENT_QUEUE: ${AGENT_QUEUE:-default}
+      WORKER_GPUS: ${WORKER_GPUS:-cpu}
+      TRAINING_IMAGE: ${TRAINING_IMAGE:-clearml-local/torch:2.9.1-py3.12-cu128}
+      DATA_HOST_DIR: ${DATA_HOST_DIR}
+      DATA_CONTAINER_DIR: ${DATA_CONTAINER_DIR}
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${AGENT_HOST_DIR}/cache
+        target: /root/.clearml
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${DATA_HOST_DIR}
+        target: ${DATA_CONTAINER_DIR}
+        read_only: true
+        bind:
+          create_host_path: false
